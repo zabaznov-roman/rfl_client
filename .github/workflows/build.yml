@@ -1,0 +1,181 @@
+# GitHub Actions: сборка RF Online client (R3Engine + RF_Online) под Windows.
+#
+# Целевой тулчейн — Visual C++ 6.0 SP6 (оригинальные .dsp проекты),
+# DirectX 8.1 SDK скачивается автоматически скриптом .github/scripts/prepare_deps.py.
+#
+# Секреты (опционально): DX81SDK_URL — прямая ссылка на dx81sdk.exe,
+# если зеркала Microsoft недоступны.
+
+name: build-rf-client
+
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      engine_cfg:
+        description: "Конфигурация движка R3Engine"
+        required: false
+        default: "R3Engine - Win32 Client Debug"
+      client_cfg:
+        description: "Конфигурация клиента RF_Online"
+        required: false
+        default: "RF_Online - Win32 Developer Debug"
+
+env:
+  ENGINE_CFG: "${{ github.event.inputs.engine_cfg || 'R3Engine - Win32 Client Debug' }}"
+  CLIENT_CFG: "${{ github.event.inputs.client_cfg || 'RF_Online - Win32 Developer Debug' }}"
+
+jobs:
+  # ======================================================================
+  # Путь A: настоящий VC6 + nmake из .dsp (идеальный, но VC6 редок в CI)
+  # ======================================================================
+  vc6:
+    runs-on: windows-2019
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Prepare dependencies (DirectX 8.1 SDK)
+        id: deps
+        shell: bash
+        env:
+          DEPS_DIR: ${{ github.workspace }}/_deps
+          DX81SDK_URL: ${{ secrets.DX81SDK_URL }}
+        run: |
+          python .github/scripts/prepare_deps.py || {
+            echo "dxsdk_found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Не удалось скачать DirectX 8.1 SDK"
+          }
+
+      - name: Detect Visual C++ 6.0
+        id: vc6
+        shell: pwsh
+        run: |
+          $paths = @(
+            "C:\Program Files (x86)\Microsoft Visual Studio\VC98",
+            "C:\Program Files (x86)\MSVisual Studio\VC98",
+            "D:\MSVisual Studio\VC98"
+          )
+          foreach ($p in $paths) {
+            if (Test-Path (Join-Path $p "Bin\CL.EXE")) {
+              echo "vc6_root=$p" >> $env:GITHUB_OUTPUT
+              echo "found=true"  >> $env:GITHUB_OUTPUT
+              exit 0
+            }
+          }
+          echo "found=false" >> $env:GITHUB_OUTPUT
+          echo "::notice::VC6 не установлен на раннере — job будет skipped."
+
+      - name: Build engine (R3EngineDMT.lib)
+        if: steps.vc6.outputs.found == 'true' && steps.deps.outputs.dxsdk_found == 'true'
+        shell: cmd
+        working-directory: R3Engine
+        env:
+          VC6_ROOT: ${{ steps.vc6.outputs.vc6_root }}
+          DXSDK_INC: ${{ steps.deps.outputs.dxsdk_include }}
+        run: |
+          call "%VC6_ROOT%\Bin\VCVARS32.BAT" x86
+          python ..\.github\scripts\gen_nmake_makes.py --dsp R3Engine.dsp --cfg "%ENGINE_CFG%" --extra-include "%DXSDK_INC%" --out ..\ci_engine.mak
+          nmake /nologo /f ..\ci_engine.mak
+
+      - name: Build client (RF_Online)
+        if: steps.vc6.outputs.found == 'true' && steps.deps.outputs.dxsdk_found == 'true'
+        shell: cmd
+        working-directory: RF_Client
+        env:
+          VC6_ROOT: ${{ steps.vc6.outputs.vc6_root }}
+          DXSDK_INC: ${{ steps.deps.outputs.dxsdk_include }}
+          DXSDK_LIB: ${{ steps.deps.outputs.dxsdk_lib }}
+        run: |
+          call "%VC6_ROOT%\Bin\VCVARS32.BAT" x86
+          python ..\.github\scripts\gen_nmake_makes.py --dsp RF_Online.dsp --cfg "%CLIENT_CFG%" --extra-include "..\R3Engine" --extra-include "..\R3Engine\1stclass" --extra-include "..\R3Engine\2ndclass" --extra-include "..\R3Engine\common" --extra-include "..\R3Engine\extension" --extra-include "%DXSDK_INC%" --extra-libpath "..\R3Engine" --extra-libpath "%DXSDK_LIB%" --out ..\ci_client.mak
+          nmake /nologo /f ..\ci_client.mak
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rf-client-vc6
+          path: |
+            R3Engine/*.lib
+            R3Engine/Client Debug/**
+            Bin/**
+            ci_*.mak
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ======================================================================
+  # Путь B: современный MSVC (best-effort) — компилирует все .cpp по
+  # sources.txt, чтобы получить полный список ошибок переносимости.
+  # Линковка не ожидается (нет DX8/MSS библиотек для нового toolchain).
+  # ======================================================================
+  msvc-modern:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64_x86   # cl.exe для 32-битной сборки
+
+      - name: Compile engine sources (report errors only)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ci_out | Out-Null
+          Set-Location R3Engine
+          $incs = @('.', '.\1stclass', '.\2ndclass', '.\common', '.\d3d\include', '.\extension')
+          $iargs = $incs | ForEach-Object { "/I`"$_`"" }
+          $fail = 0; $ok = 0
+          Get-Content sources.txt | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object {
+            $src = $_
+            & cl.exe /nologo /c /EHsc /MT /W3 /Od /DWIN32 /D_DEBUG /D_MBCS /D_LIB /DRTMOVIE /Fo"..\ci_out\\" @iargs $src 2>&1 | Tee-Object -Variable out | Out-Null
+            if ($LASTEXITCODE -ne 0) { $fail++; Write-Host "FAIL: $src"; $out | Select-Object -First 6 }
+            else { $ok++ }
+          }
+          "engine: ok=$ok fail=$fail" | Tee-Object -FilePath ../ci_out/engine_summary.txt
+          if ($fail -gt 0) { exit 1 }
+
+      - name: Compile client sources (report errors only)
+        shell: pwsh
+        run: |
+          Set-Location RF_Client
+          $incs = @('.', '..', '..\R3Engine', '..\R3Engine\1stclass', '..\R3Engine\2ndclass',
+                    '..\R3Engine\common', '..\R3Engine\d3d\include', '..\R3Engine\extension')
+          $iargs = $incs | ForEach-Object { "/I`"$_`"" }
+          $fail = 0; $ok = 0
+          Get-Content sources.txt | ForEach-Object { $_.Trim() } | Where-Object { $_ } | ForEach-Object {
+            $src = $_
+            & cl.exe /nologo /c /EHsc /MTd /W3 /Od /DWIN32 /D_DEBUG /D_WINDOWS /D_MBCS /D_DEVELOPER_ /D_NEW_UI_ /Fo"..\ci_out\\" @iargs $src 2>&1 | Tee-Object -Variable out | Out-Null
+            if ($LASTEXITCODE -ne 0) { $fail++; Write-Host "FAIL: $src"; $out | Select-Object -First 6 }
+            else { $ok++ }
+          }
+          "client: ok=$ok fail=$fail" | Tee-Object -FilePath ../ci_out/client_summary.txt
+          if ($fail -gt 0) { exit 1 }
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Modern MSVC best-effort compile"
+            cat ci_out/*_summary.txt 2>/dev/null || echo "(нет итогов — оба шага упали рано)"
+            echo ""
+            echo "Линковка невозможна без DX8.1 SDK и проприетарного mss32.lib;"
+            echo "этот job показывает только ошибки совместимости кода с новым cl.exe."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rf-client-msvc-objects
+          path: ci_out
+          if-no-files-found: warn
+          retention-days: 14
