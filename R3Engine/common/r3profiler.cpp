@@ -9,7 +9,7 @@ UINT64 CR3Profiler::GetTicks()
 	{
 		while(!qw)
 			QueryPerformanceCounter((LARGE_INTEGER *) &qw);
-	} 
+	}
 	else
 		qw = 0;
 	return qw;
@@ -54,7 +54,7 @@ float CR3Profiler::IntervalTime(UINT64 old_qw,UINT64 qw)
 	return m_fSecsPerFrame;
 }
 
-void CR3Profiler::CleanR3Profiler()		//토탈타임을 지운다.
+void CR3Profiler::CleanR3Profiler()
 {
 	for(DWORD i=0; i<m_TotalIDNum; i++)
 		m_ProfileTime[i].m_TotalTime =0;
@@ -64,18 +64,27 @@ void CR3Profiler::EndR3Profiler()
 {
 	UINT64 final_qw = GetTicks();
 	m_TotalIDNum = m_NowID;
+	m_TotalTime = 0;
+
+	// No named intervals means there is no final interval to record.
+	if(m_NowID == 0)
+	{
+		m_bIsBegin=0;
+		return;
+	}
+
 	UINT64 old_qw = m_ProfileTime[0].m_qwStartTicks;
-	for(DWORD i=1; i<m_NowID; i++)
+	DWORD i;
+	for(i=1; i<m_NowID; i++)
 	{
 		m_ProfileTime[i-1].m_LoopTime = IntervalTime(old_qw,m_ProfileTime[i].m_qwStartTicks);
 		m_ProfileTime[i-1].m_TotalTime += m_ProfileTime[i-1].m_LoopTime;
 		old_qw = m_ProfileTime[i].m_qwStartTicks;
 	}
-	m_ProfileTime[i-1].m_LoopTime = IntervalTime(old_qw,final_qw);
-	m_ProfileTime[i-1].m_TotalTime += m_ProfileTime[i-1].m_LoopTime;
+	m_ProfileTime[m_NowID-1].m_LoopTime = IntervalTime(old_qw,final_qw);
+	m_ProfileTime[m_NowID-1].m_TotalTime += m_ProfileTime[m_NowID-1].m_LoopTime;
 
-	m_TotalTime=0;
-	for( i=0; i<m_NowID; i++)
+	for(i=0; i<m_NowID; i++)
 		m_TotalTime += m_ProfileTime[i].m_TotalTime;
 	m_bIsBegin=0;
 }
@@ -107,7 +116,7 @@ void CR3Profiler::StartR3ProfilerName(char *name)
 {
 	if( !m_bIsBegin )
 		return;
-	if( m_NowID >= _TOTAL_ELEMENT )	//넘치는거 막는다.
+	if( m_NowID >= _TOTAL_ELEMENT )
 		return;
 	if( m_ProfileTime[m_NowID].mName[0] == NULL )
 	{
