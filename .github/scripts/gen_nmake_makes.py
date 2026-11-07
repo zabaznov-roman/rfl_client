@@ -91,7 +91,12 @@ def main():
     obj_dir = d["intermediate_dir"] or "obj_ci"
     out_dir = d["output_dir"] or "."
 
-    objs = " ".join(os.path.splitext(s)[0] + ".obj" for s in d["sources"])
+    # cl.exe вызывается из корня проекта; /Fo"$@" требует, чтобы obj-файлы
+    # складывались в OBJDIR с плоскими именами (иначе каталоги могут не существовать)
+    objs = " ".join(
+        os.path.join(obj_dir, os.path.basename(os.path.splitext(s.replace("\\", "/"))[0]) + ".obj")
+        for s in d["sources"]
+    )
 
     is_lib = bool(d["lib32"]) and not d["link32"]
     m = re.search(r'/out:"([^"]+)"', d["lib32"] if is_lib else d["link32"])
@@ -129,7 +134,8 @@ def main():
         a("\tlink.exe %s /out:\"$@\" $(OBJS)" % linkflags)
     a("")
     a(".cpp.obj:")
-    a("\tcl.exe $(CPPFLAGS) /c /Fo\"$@\" $<")
+    a("\t-if not exist \"$(OBJDIR)\" mkdir \"$(OBJDIR)\"")
+    a("\tcl.exe $(CPPFLAGS) /c /Fo\"$(OBJDIR)/$(@F)\" $<")
     if d["rc"]:
         a("")
         a(".rc.res:")

@@ -1,8 +1,1 @@
-build_mingw/
-*.tmp
-_deps/
-ci_out/
-ci_*.mak
-*.obj
-*.res
-R3Engine/sources.txt.bak
+__pycache__/
