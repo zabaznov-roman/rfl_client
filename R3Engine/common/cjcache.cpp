@@ -4,7 +4,7 @@
 #define UnSetCache(num)	(mCacheBitBuf[num>>3]&=(~(1<<(num&7))))
 #define IsCached(num)	(mCacheBitBuf[num>>3]&(1<<(num&7)))
 
-void CJcache::CreateJcache(DWORD cache_num,DWORD struct_size)		//Á¦ÇÑµÈ Ä³½¬ °¹¼ö¸¦ ÃÊ±âÈ­ÇØ¾ßÇÔ.
+void CJcache::CreateJcache(DWORD cache_num,DWORD struct_size)		//ì œí•œëœ ìºì‰¬ ê°¯ìˆ˜ë¥¼ ì´ˆê¸°í™”í•´ì•¼í•¨.
 {
 	mCacheNum = cache_num;
 	mStructSize = struct_size;
@@ -22,11 +22,11 @@ DWORD CJcache::GetCacheLoopID()
 	DWORD i,j;
 	for(i=0; i<(mCacheNum/8+1); i++)
 	{
-		if( mCacheBitBuf[i] != 0xff )	//ºó°÷ÀÌ ÀÖ´Ù.
+		if( mCacheBitBuf[i] != 0xff )	//ë¹ˆê³³ì´ ìˆë‹¤.
 		{
 			for(j=0; j<8; j++)
 			{
-				if( !(mCacheBitBuf[i] & ( 1<<j )) ) //ºñ¾ú´Ù.
+				if( !(mCacheBitBuf[i] & ( 1<<j )) ) //ë¹„ì—ˆë‹¤.
 				{
 					return (i*8+j);
 					//return mCacheBuf[mStructSize*(i*8+j)];
@@ -77,24 +77,25 @@ CJcache::~CJcache()
 		Dfree(mCacheBuf);
 }
 
-LONG CJcache::HitCache(DWORD id,void **get_cache_ptr)	//Ä³½¬¸¦ »ç¿ëÇÏ´Â È÷Æ®, ¸®ÅÏ°ªÀÌ TRUEÀÏ°æ¿ì ÀÌÀü¿¡ Ä³½¬µÈ °Å´Ù.
+LONG CJcache::HitCache(DWORD id,void **get_cache_ptr)	//ìºì‰¬ë¥¼ ì‚¬ìš©í•˜ëŠ” íˆíŠ¸, ë¦¬í„´ê°’ì´ TRUEì¼ê²½ìš° ì´ì „ì— ìºì‰¬ëœ ê±°ë‹¤.
 {
 	_CJCACHE_CONTENT *content;
 	int j=0;
+	JCache::iterator i;
 
-	for( JCache::iterator i = mCacheList.begin(); i != mCacheList.end(); i++,j++ )
+	for( i = mCacheList.begin(); i != mCacheList.end(); i++,j++ )
 	{
 		content = *i;
 		
 		if( content->mID == id )
 		{
 			*get_cache_ptr = &mCacheBuf[mStructSize*content->mLoopID];
-			mCacheList.erase(i);		//Áö¿ì°í °¡Àå ¾Õ¿¡´Ù µĞ´Ù.
+			mCacheList.erase(i);		//ì§€ìš°ê³  ê°€ì¥ ì•ì—ë‹¤ ë‘”ë‹¤.
 			mCacheList.push_front( content );
 			return _HITCACHE_RET_OLD;
 		}
 	}
-	if( j >= mCacheNum )	//¸¸¾à ³ÑÄ£´Ù¸é °¡Àå ¿À·¡µÈ°Å¸¦ ¸®ÅÏÇÑ´Ù. falseÀÏ°æ¿ì´Â ¹İµå½Ã Áö¿ì°í »ç¿ëÇÑ´Ù.
+	if( j >= mCacheNum )	//ë§Œì•½ ë„˜ì¹œë‹¤ë©´ ê°€ì¥ ì˜¤ë˜ëœê±°ë¥¼ ë¦¬í„´í•œë‹¤. falseì¼ê²½ìš°ëŠ” ë°˜ë“œì‹œ ì§€ìš°ê³  ì‚¬ìš©í•œë‹¤.
 	{
 		i=mCacheList.end();
 		i--;
@@ -102,16 +103,16 @@ LONG CJcache::HitCache(DWORD id,void **get_cache_ptr)	//Ä³½¬¸¦ »ç¿ëÇÏ´Â È÷Æ®, ¸®
 		*get_cache_ptr = &mCacheBuf[mStructSize*content->mLoopID];
 
 		content->mID = id;
-		mCacheList.erase(i);		//Áö¿ì°í Á© ¾ÕÀ¸·Î ÇØ³õÀÚ.
+		mCacheList.erase(i);		//ì§€ìš°ê³  ì ¤ ì•ìœ¼ë¡œ í•´ë†“ì.
 //		mCacheList.push_back( content );
 		mCacheList.push_front( content );
-		return _HITCACHE_RET_DEL_AND_NEW;  //Áö¿î´ÙÀ½ »õ·Î »ğÀÔÇØ¾ßÇÔ.
+		return _HITCACHE_RET_DEL_AND_NEW;  //ì§€ìš´ë‹¤ìŒ ìƒˆë¡œ ì‚½ì…í•´ì•¼í•¨.
 	}
 	
-	// »õ·Î¿î ¹öÆÛ¸¦ º¸³½´Ù. »ğÀÔÇØ¾ßµÈ´Ù.
+	// ìƒˆë¡œìš´ ë²„í¼ë¥¼ ë³´ë‚¸ë‹¤. ì‚½ì…í•´ì•¼ëœë‹¤.
 	DWORD l_id = GetCacheLoopID();
 	if( l_id ==-1 )
-		Error("Ä³½¬ ¿¡·¯!","Ä¡¸íÀûÀÓ...");
+		Error("ìºì‰¬ ì—ëŸ¬!","ì¹˜ëª…ì ì„...");
 
 	mContent[l_id].mID = id;
 	mContent[l_id].mLoopID = l_id;
@@ -124,7 +125,7 @@ LONG CJcache::HitCache(DWORD id,void **get_cache_ptr)	//Ä³½¬¸¦ »ç¿ëÇÏ´Â È÷Æ®, ¸®
 	return _HITCACHE_RET_NEW;
 }
 
-BOOL CJcache::DelCache(DWORD id)						//Ä³½¬µÈ ¹öÆÛ¸¦ Áö¿î´Ù. ±¸Á¶Ã¼ ¾ÈÀÇ °ÍµéÀ» Áö¿ì±âÀ§ÇØ GetCacheÅëÇØ »ç¿ëÇÑÈÄ ÀÌÇÔ¼ö È£Ãâ.
+BOOL CJcache::DelCache(DWORD id)							//ìºì‰¬ëœ ë²„í¼ë¥¼ ì§€ìš´ë‹¤. êµ¬ì¡°ì²´ ì•ˆì˜ ê²ƒë“¤ì„ ì§€ìš°ê¸°ìœ„í•´ GetCacheí†µí•´ ì‚¬ìš©í•œí›„ ì´í•¨ìˆ˜ í˜¸ì¶œ.
 {
 	_CJCACHE_CONTENT *content;
 
@@ -143,7 +144,7 @@ BOOL CJcache::DelCache(DWORD id)						//Ä³½¬µÈ ¹öÆÛ¸¦ Áö¿î´Ù. ±¸Á¶Ã¼ ¾ÈÀÇ °ÍµéÀ»
 	return FALSE;
 }
 
-BOOL CJcache::GetCache(DWORD id,void **get_cache_ptr)	//Ä³½¬µÈ ¹öÆÛ¸¦ ¾ò´Â´Ù. ¾øÀ¸¸é FALSE¸¦ ¸®ÅÏ
+BOOL CJcache::GetCache(DWORD id,void **get_cache_ptr)	//ìºì‰¬ëœ ë²„í¼ë¥¼ ì–»ëŠ”ë‹¤. ì—†ìœ¼ë©´ FALSEë¥¼ ë¦¬í„´
 {
 	_CJCACHE_CONTENT *content;
 
@@ -161,7 +162,7 @@ BOOL CJcache::GetCache(DWORD id,void **get_cache_ptr)	//Ä³½¬µÈ ¹öÆÛ¸¦ ¾ò´Â´Ù. ¾ø
 }
 
 
-DWORD CJcache::GetCacheCnt()  //Ä³½¬Ä«¿îÆ®º¯¼ö
+DWORD CJcache::GetCacheCnt()  //ìºì‰¬ì¹´ìš´íŠ¸ë³€ìˆ˜
 {
 	_CJCACHE_CONTENT *content;
 
